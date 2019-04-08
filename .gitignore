@@ -1,0 +1,12 @@
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+*.res
+.vscode/
+docs/build/
+docs/site/
+test/downloads
+test/*.pdf
+test/*.res
+test/pvt
+file.txt
