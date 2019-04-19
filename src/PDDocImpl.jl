@@ -10,18 +10,23 @@ mutable struct PDDocImpl <: PDDoc
     isTagged::Symbol #Valid values :tagged, :none and :suspect
     fonts::Dict{CosObject, PDFont}
     xobjs::Dict{CosObject, PDXObject}
+    pager2n::Dict{CosIndirectObjectRef, Int}
+    pagen2r::Dict{Int, CosIndirectObjectRef}
     function PDDocImpl(fp::AbstractString)
         cosDoc = cosDocOpen(fp)
         catalog = cosDocGetRoot(cosDoc)
         new(cosDoc,catalog,CosNull,CosNull,:none,
-            Dict{CosObject, PDFont}(), Dict{CosObject, PDXObject}())
+            Dict{CosObject, PDFont}(), Dict{CosObject, PDXObject}(),
+            Dict{CosIndirectObjectRef, Int}(),
+            Dict{Int, CosIndirectObjectRef}())
     end
 end
 
-function pdDocGetPage(doc::PDDocImpl, num::Int)
-    cosobj = find_page_from_treenode(doc.pages, num)
-    return create_pdpage(doc, cosobj)
-end
+pdDocGetPage(doc::PDDocImpl, num::Int) = 
+    pdDocGetPage(doc, pd_doc_get_page(doc, num))
+
+pdDocGetPage(doc::PDDoc, cosref::CosIndirectObjectRef) = 
+    create_pdpage(doc, cosDocGetObject(doc.cosDoc, cosref))
 
 """
 ```
@@ -42,10 +47,8 @@ end
 Recursively reads the page object and populates the indirect objects
 Ensures indirect objects are read and updated in the xref Dictionary.
 """
-populate_doc_pages(doc::PDDocImpl, dict::CosIndirectObject{CosDict}) =
-    populate_doc_pages(doc, dict.obj)
-
-function populate_doc_pages(doc::PDDocImpl, dict::CosDict)
+function populate_doc_pages(doc::PDDocImpl, dict::CosIndirectObject{CosDict},
+                            ncurr::Int)
     if (cn"Pages" == get(dict, cn"Type"))
         kids = cosDocGetObject(doc.cosDoc, dict, cn"Kids")
         arr = get(kids)
@@ -55,51 +58,35 @@ function populate_doc_pages(doc::PDDocImpl, dict::CosDict)
             obj = cosDocGetObject(doc.cosDoc, ref)
             if obj !== CosNull
                 push!(arr, obj)
-                populate_doc_pages(doc, obj)
+                ncurr = populate_doc_pages(doc, obj, ncurr)
             end
         end
+    else
+        ncurr += 1
+        ref = CosIndirectObjectRef(dict)
+        doc.pager2n[ref]   = ncurr
+        doc.pagen2r[ncurr] = ref
     end
     parent = get(dict, cn"Parent")
     if (parent === CosNull)
         obj = cosDocGetObject(doc.cosDoc, parent)
-        set!(dict,CosName("Parent"),obj)
+        set!(dict, CosName("Parent"), obj)
     end
-    return nothing
+    return ncurr
 end
 
-populate_doc_pages(doc::PDDocImpl, dict::CosObject) = nothing
+populate_doc_pages(doc::PDDocImpl, dict::CosNullType, ncurr::Int) = nothing
+
+pd_doc_get_pagenum(doc, pagenum::Int) = pagenum
+pd_doc_get_pagenum(doc, pageref::CosIndirectObjectRef) = doc.pager2n[pageref]
+pd_doc_get_page(doc, pagenum::Int) = doc.pagen2r[pagenum]
 
 @inline function update_page_tree(doc::PDDocImpl)
     pagesref = get(doc.catalog, cn"Pages")::CosIndirectObjectRef
     pages = cosDocGetObject(doc.cosDoc, pagesref)::CosIndirectObject{CosDict}
-    populate_doc_pages(doc, pages)
+    populate_doc_pages(doc, pages, 0)
     doc.pages = pages
     return nothing
-end
-
-#=
-This implementation may seem non-intuitive to some due to recursion and also
-seemingly non-standard way of computing page count. However, PDF spec does not
-discount the possibility of an intermediate node having page and pages nodes
-in the kids array. Hence, this implementation.
-=#
-function find_page_from_treenode(node::IDD{CosDict}, pageno::Int)
-    mytype = get(node, cn"Type")
-    #If this is a page object the pageno has to be 1
-    if mytype == cn"Page"
-        pageno == 1 && return node
-        throw(ErrorException(E_INVALID_PAGE_NUMBER))
-    end
-    kids = get(node, cn"Kids")
-    kidsarr = get(kids)
-    sum = 0
-    for kid in kidsarr
-        cnt = Cos.get_internal_pagecount(kid)
-        (sum + cnt) >= pageno &&
-            return find_page_from_treenode(kid, pageno-sum)
-        sum += cnt
-    end
-    throw(ErrorException(E_INVALID_PAGE_NUMBER))
 end
 
 # The structure tree is not fully loaded but the object linkages are established for future
@@ -124,6 +111,5 @@ end
 get_pd_font!(doc::PDDocImpl, cosfont::IDD{CosDict}) =
     get!(doc.fonts, cosfont, PDFont(doc, cosfont))
 
-get_pd_xobject!(doc::PDDocImpl, cosxobj::CosObject) = 
+get_pd_xobject!(doc::PDDocImpl, cosxobj::CosObject) =
     get!(doc.xobjs, cosxobj, createPDXObject(doc, cosxobj))
-

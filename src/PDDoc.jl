@@ -8,7 +8,8 @@ export PDDoc,
        pdDocGetPage,
        pdDocGetPageCount,
        pdDocGetPageRange,
-       pdDocHasPageLabels
+       pdDocHasPageLabels,
+       pdDocGetOutline
 
 using ..Common
 
@@ -89,8 +90,10 @@ pdDocGetCosDoc(doc::PDDoc)= doc.cosDoc
 """
 ```
     pdDocGetPage(doc::PDDoc, num::Int) -> PDPage
+    pdDocGetPage(doc::PDDoc, ref::CosIndirectObjectRef) -> PDPage
 ```
-Given a document absolute page number, provides the associated page object.
+Given a document absolute page number or object reference, provides the
+associated page object.
 """
 pdDocGetPage
 
@@ -102,7 +105,8 @@ pdDocGetPage
 ```
 Given a range of page numbers or a label returns an array of pages associated
 with it.
-For a detailed explanation on page labels, refer to the method `pdDocHasPageLabels`.
+For a detailed explanation on page labels, refer to the method
+`pdDocHasPageLabels`.
 """
 function pdDocGetPageRange(doc::PDDoc, nums::AbstractRange{Int})
     pages = []
@@ -122,11 +126,11 @@ end
 ```
     pdDocHasPageLabels(doc::PDDoc) -> Bool
 ```
-Returns `true` if the document has page labels defined.  
+Returns `true` if the document has page labels defined.
 
-As per PDF Specification 1.7 Section 12.4.2, a document may optionally define page 
-labels (PDF 1.3) to identifyeach page visually on the screen or in print. Page labels 
-and page indices need not coincide: the indices shallbe fixed, running consecutively 
+As per PDF Specification 1.7 Section 12.4.2, a document may optionally define page
+labels (PDF 1.3) to identifyeach page visually on the screen or in print. Page labels
+and page indices need not coincide: the indices shallbe fixed, running consecutively
 through the document starting from 0 for the first page, but the labels may be
 specified in any way that is appropriate for the particular document.
 """
@@ -158,7 +162,7 @@ function pdDocGetInfo(doc::PDDoc)
                           (skey == "ModDate") ? CDDate(val) :
                           (skey == "Trapped") ? val : CDTextString(val)
         catch
-            # no op: we skipp the key that cannot be properly decoded
+            # no op: we skip the key that cannot be properly decoded
         end
     end
     return dInfo
@@ -180,4 +184,34 @@ function pdDocGetNamesDict(doc::PDDoc)
     catalog = pdDocGetCatalog(doc)
     ref = get(catalog, CosName("Names"))
     obj = cosDocGetObject(doc.cosDoc, ref)
+end
+
+"""
+```
+    pdDocGetOutline(doc::PDDoc) -> PDOutline
+```
+Given a PDF document provides the document Outline (Table of Contents) available
+in the `Document Catalog` dictionary. If document does not have Outline, this
+method returns `nothing`.
+
+A PDF document may contain a document outline that the conforming reader may
+display on the screen, allowing the user to navigate interactively from one part
+of the document to another. The outline consists of a tree-structured hierarchy
+of outline items (sometimes called bookmarks), which serve as a visual table of
+contents to display the document’s structure to the user. The user may
+interactively open and close individual items by clicking them with the mouse.
+When an item is open, its immediate children in the hierarchy shall become
+visible on the screen; each child may in turn be open or closed, selectively
+revealing or hiding further parts of the hierarchy. When an item is closed, all
+of its descendants in the hierarchy shall be hidden. Clicking the text of any
+visible item activates the item, causing the conforming reader to jump to a
+destination or trigger an action associated with the item. - Section 12.3.3 -
+Document management — Portable document format — Part 1: PDF 1.7
+"""
+function pdDocGetOutline(doc::PDDoc)
+    catalog = pdDocGetCatalog(doc)
+    cosDoc = pdDocGetCosDoc(doc)
+    tocobj = cosDocGetObject(cosDoc, catalog, cn"Outlines")
+    tocobj === nothing && return nothing
+    return PDOutline(doc, tocobj)
 end
