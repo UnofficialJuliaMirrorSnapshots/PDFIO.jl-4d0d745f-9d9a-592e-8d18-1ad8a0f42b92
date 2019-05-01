@@ -193,7 +193,8 @@ get_encoded_string(s::CosString, fum::Nothing) = CDTextString(s)
 get_encoded_string(s::CosString, fum::FontUnicodeMapping) = 
     get_encoded_string(Vector{UInt8}(s), fum)
 
-@inline function get_encoded_string(v::Vector{UInt8}, fum::FontUnicodeMapping)
+@inline function get_encoded_string(v::Union{Vector{UInt8}, NTuple{N, UInt8}},
+                                    fum::FontUnicodeMapping) where N
     length(v) == 0 && return ""
     fum.hasCMap && return get_encoded_string(v, fum.cmap)
     return String(NativeEncodingToUnicode(v, fum.encoding))
@@ -253,7 +254,7 @@ end
 get_encoded_string(s::CosString, cmap::CMap) =
     get_encoded_string(Vector{UInt8}(s), cmap::CMap)
 
-function get_encoded_string(barr::Vector{UInt8}, cmap::CMap)
+function get_encoded_string(barr, cmap::CMap)
     cs = cmap.code_space
     rm = cmap.range_map
     l = length(barr)
@@ -273,16 +274,16 @@ function get_encoded_string(barr::Vector{UInt8}, cmap::CMap)
         # code space. So may need to decipher the existence of a single
         # byte vs 2-byte code from the range map. See `else` below.
         itree = xs[1][2]
-        # This case is very clearly a single byte range 
+        # This case is very clearly a single byte range
+        itv = intersect(rm, Interval(b1, b1))
         if itree === CosNull 
-            itv = intersect(rm, Interval(b1, b1))
             if length(itv) > 0
                 carr = get_unicode_chars(b1, itv[1][1], itv[1][2])
             else
                 push!(carr, Char(0))
             end
         else
-            itree1 = intersect(rm, Interval(b1, b1))
+            itree1 = itv 
             if length(itree1) == 0
                 push!(carr, Char(0))
                 continue
@@ -400,10 +401,44 @@ SPACE_CODE(w::CIDWidth) = get_character_code(cn"space", w)
 INIT_CODE(x) = 0x00
 SPACE_CODE(x) = get_character_code(cn"space", x)
 
+"""
+```
+    pdFontIsBold(pdfont::PDFont)    ->Bool
+```
+    Returns `true` is the fonts have the attribute specified
+"""
 pdFontIsBold(pdfont::PDFont)     = (pdfont.flags & 0x80000000) > 0
+
+"""
+```
+    pdFontIsItalic(pdfont::PDFont)  ->Bool
+```
+    Returns `true` is the fonts have the attribute specified
+"""
 pdFontIsItalic(pdfont::PDFont)   = (pdfont.flags & 0x00000040) > 0
+
+"""
+```
+    pdFontIsFixedW(pdfont::PDFont)  ->Bool
+```
+    Returns `true` is the fonts have the attribute specified
+"""
 pdFontIsFixedW(pdfont::PDFont)   = (pdfont.flags & 0x00000001) > 0
+
+"""
+```
+    pdFontIsAllCap(pdfont::PDFont)  ->Bool
+```
+    Returns `true` is the fonts have the attribute specified
+"""
 pdFontIsAllCap(pdfont::PDFont)   = (pdfont.flags & 0x00010000) > 0
+
+"""
+```
+    pdFontIsSmallCap(pdfont::PDFont)->Bool
+```
+    Returns `true` is the fonts have the attribute specified
+"""
 pdFontIsSmallCap(pdfont::PDFont) = (pdfont.flags & 0x00020000) > 0
 
 # Not supported FD attribute in CIDFonts
